@@ -1,9 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
+import AppShell from '../components/AppShell';
+import { useAuth } from '../context/AuthContext';
 
 export default function MyBorrows() {
   const [records, setRecords] = useState([]);
   const [error, setError] = useState('');
+  const { user } = useAuth();
 
   useEffect(() => {
     fetchRecords();
@@ -18,6 +21,15 @@ export default function MyBorrows() {
     }
   }
 
+  // GET /borrow intentionally returns every user's records for staff/admin
+  // (that's what the admin panel's Manage Borrows page needs) - this page is
+  // the member-facing "my own loans" view for every role, so it must filter
+  // down to the current user regardless of who's logged in.
+  const myRecords = useMemo(
+    () => records.filter((r) => (r.member?._id || r.member?.id || r.member) === user?.id),
+    [records, user]
+  );
+
   async function handleReturn(recordId) {
     try {
       await api.put(`/borrow/${recordId}/return`);
@@ -28,6 +40,7 @@ export default function MyBorrows() {
   }
 
   return (
+    <AppShell>
     <div className="page">
       <h1>My Borrowed Books</h1>
       {error && <p className="error-text">{error}</p>}
@@ -43,7 +56,7 @@ export default function MyBorrows() {
           </tr>
         </thead>
         <tbody>
-          {records.map((r) => (
+          {myRecords.map((r) => (
             <tr key={r._id}>
               <td>{r.book?.title}</td>
               <td>{new Date(r.borrowDate).toLocaleDateString()}</td>
@@ -56,7 +69,7 @@ export default function MyBorrows() {
               </td>
             </tr>
           ))}
-          {records.length === 0 && (
+          {myRecords.length === 0 && (
             <tr>
               <td colSpan="5">No borrow records yet.</td>
             </tr>
@@ -64,5 +77,6 @@ export default function MyBorrows() {
         </tbody>
       </table>
     </div>
+    </AppShell>
   );
 }

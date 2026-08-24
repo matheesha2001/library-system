@@ -17,40 +17,6 @@ body {
   color: var(--ink);
 }
 
-.navbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1rem 2rem;
-  background: var(--moss-dark);
-  color: var(--paper);
-}
-
-.navbar .brand {
-  font-size: 1.25rem;
-  font-weight: bold;
-  color: var(--paper);
-  text-decoration: none;
-}
-
-.nav-links {
-  display: flex;
-  gap: 1.25rem;
-  align-items: center;
-}
-
-.nav-links a {
-  color: var(--paper);
-  text-decoration: none;
-}
-
-.nav-links a:hover { text-decoration: underline; }
-
-.nav-user {
-  font-style: italic;
-  opacity: 0.85;
-}
-
 button {
   font-family: inherit;
   background: var(--moss);
@@ -67,41 +33,7 @@ button.danger { background: var(--danger); }
 
 .page { max-width: 960px; margin: 0 auto; padding: 2rem; }
 
-.auth-page {
-  display: flex;
-  justify-content: center;
-  padding: 3rem 1rem;
-}
-
-.auth-form {
-  background: white;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 2rem;
-  width: 100%;
-  max-width: 360px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-}
-
-.auth-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  font-size: 0.9rem;
-}
-
-.auth-form input, .auth-form select {
-  padding: 0.5rem;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  font-family: inherit;
-}
-
 .error-text { color: var(--danger); }
-
-.auth-switch { font-size: 0.85rem; text-align: center; }
 
 .inline-form {
   display: flex;
@@ -154,3 +86,38 @@ button.danger { background: var(--danger); }
 .records-table .returned { color: var(--moss-dark); }
 .records-table .borrowed { color: var(--clay); }
 .records-table .overdue { color: var(--danger); }
+
+/* Dark Mode Styles for legacy CSS elements */
+.dark body {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.dark .inline-form,
+.dark .book-card,
+.dark .records-table {
+  background: #1e293b;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+.dark .inline-form input {
+  background: #0f172a;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+.dark .book-card .available,
+.dark .records-table .returned {
+  color: #34d399;
+}
+
+.dark .book-card .unavailable,
+.dark .records-table .overdue,
+.dark .error-text {
+  color: #f87171;
+}
+
+.dark .records-table th, .dark .records-table td {
+  border-bottom-color: #334155;
+}

@@ -1,17 +1,36 @@
 const express = require('express');
+const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
+const { protect } = require('../middleware/auth');
+const generateMemberId = require('../utils/memberId');
 
 const router = express.Router();
+
+// Stricter limit on login specifically, to slow down credential stuffing -
+// only failed attempts count against it, so a legitimate user logging in
+// repeatedly (or several users sharing an IP) isn't penalized.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  message: { message: 'Too many login attempts. Please try again in 15 minutes.' },
+});
 
 // POST /api/auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, studentId, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email and password are required' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
     }
 
     const existingUser = await User.findOne({ email });
@@ -21,22 +40,29 @@ router.post('/register', async (req, res) => {
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    const memberId = await generateMemberId();
 
     const user = await User.create({
       name,
+      memberId,
+      studentId,
       email,
       password: hashedPassword,
-      role: role === 'admin' ? 'admin' : 'member', // only allow admin if explicitly set (demo purposes)
+      // Public self-registration can only ever create a member account.
+      // Staff/admin accounts are provisioned separately (POST /api/staff/register,
+      // PUT /api/users/:id/role, or scripts/createAdmin.js) - any "role" field
+      // sent by the client on this route is intentionally ignored.
+      role: 'member',
     });
 
-    res.status(201).json({ id: user._id, name: user.name, email: user.email, role: user.role });
+    res.status(201).json({ id: user._id, name: user.name, memberId: user.memberId, studentId: user.studentId, email: user.email, role: user.role });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
 // POST /api/auth/login
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -45,9 +71,17 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
+    if (!user.password) {
+      return res.status(400).json({ message: "This account uses GitHub sign-in. Please use the 'Sign in with GitHub' button." });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid email or password' });
+    }
+
+    if (user.isBlocked) {
+      return res.status(403).json({ message: 'This account has been blocked. Please contact library staff.' });
     }
 
     const token = jwt.sign(
@@ -58,10 +92,106 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: user._id, name: user.name, email: user.email, role: user.role },
+      user: { id: user._id, name: user.name, memberId: user.memberId, studentId: user.studentId, email: user.email, role: user.role, profilePicture: user.profilePicture },
     });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/auth/me - the current logged-in user's own profile, straight from the DB
+router.get('/me', protect, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /api/auth/github - redirect the browser to GitHub's authorize page
+router.get('/github', (req, res) => {
+  const params = new URLSearchParams({
+    client_id: process.env.GITHUB_CLIENT_ID,
+    redirect_uri: process.env.GITHUB_CALLBACK_URL,
+    scope: 'read:user user:email',
+  });
+  res.redirect(`https://github.com/login/oauth/authorize?${params}`);
+});
+
+// GET /api/auth/github/callback - GitHub redirects back here with a temporary code
+router.get('/github/callback', async (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
+  }
+
+  try {
+    // Exchange the temporary code for an access token
+    const tokenRes = await axios.post(
+      'https://github.com/login/oauth/access_token',
+      {
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code,
+        redirect_uri: process.env.GITHUB_CALLBACK_URL,
+      },
+      { headers: { Accept: 'application/json' } }
+    );
+
+    const accessToken = tokenRes.data.access_token;
+    if (!accessToken) {
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
+    }
+
+    // Fetch the GitHub profile + email
+    const profileRes = await axios.get('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const emailsRes = await axios.get('https://api.github.com/user/emails', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    // Prefer the email GitHub flags as primary; fall back to any verified
+    // email in the list before giving up - some accounts don't return
+    // exactly one primary-flagged entry even though the API contract implies
+    // they should.
+    const primaryEmail = emailsRes.data.find((e) => e.primary)?.email || emailsRes.data[0]?.email || null;
+    const { id: githubId, login, avatar_url, name } = profileRes.data;
+
+    // Find or create the local user, matched by githubId
+    let user = await User.findOne({ githubId });
+    if (!user) {
+      if (!primaryEmail) {
+        // User.js allows email to be omitted for GitHub accounts (matching
+        // the same conditional-required pattern as password), so this isn't
+        // strictly required to avoid a crash - but signing someone up with no
+        // email at all would be a confusing, degraded account, so surface a
+        // specific, actionable error instead.
+        return res.redirect(`${process.env.CLIENT_URL}/login?error=github_no_email`);
+      }
+      user = await User.create({
+        githubId,
+        memberId: await generateMemberId(),
+        name: name || login,
+        email: primaryEmail,
+        role: 'member',
+      });
+    }
+
+    // Issue the same kind of JWT used by normal login
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.redirect(`${process.env.CLIENT_URL}/oauth-success?token=${token}`);
+  } catch (err) {
+    console.error('GitHub OAuth error:', err.response?.data || err.message);
+    res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
   }
 });
 

@@ -2,11 +2,17 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import socket from '../api/socket';
 import { useAuth } from '../context/AuthContext';
+import AppShell from '../components/AppShell';
+import { isPanelUser } from '../utils/permissions';
+
+const PAGE_SIZE = 24;
 
 export default function Books() {
   const [books, setBooks] = useState([]);
   const [error, setError] = useState('');
   const [newBook, setNewBook] = useState({ title: '', author: '', isbn: '', totalCopies: 1 });
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -21,25 +27,24 @@ export default function Books() {
       );
     });
 
-    socket.on('bookAdded', (book) => {
-      setBooks((prev) => [book, ...prev]);
-    });
-
-    socket.on('bookDeleted', ({ id }) => {
-      setBooks((prev) => prev.filter((b) => b._id !== id));
-    });
+    // A book was added/deleted somewhere - re-fetch the current page rather
+    // than patching in place, since the catalogue is now paginated and a
+    // manual insert/removal would leave the page size and total out of sync.
+    socket.on('bookAdded', () => fetchBooks());
+    socket.on('bookDeleted', () => fetchBooks());
 
     return () => {
       socket.off('availabilityChanged');
       socket.off('bookAdded');
       socket.off('bookDeleted');
     };
-  }, []);
+  }, [page]);
 
   async function fetchBooks() {
     try {
-      const res = await api.get('/books');
-      setBooks(res.data);
+      const res = await api.get('/books', { params: { page, limit: PAGE_SIZE } });
+      setBooks(res.data.books);
+      setTotalPages(res.data.totalPages);
     } catch (err) {
       setError('Could not load books');
     }
@@ -75,11 +80,12 @@ export default function Books() {
   }
 
   return (
+    <AppShell>
     <div className="page">
       <h1>Book Catalogue</h1>
       {error && <p className="error-text">{error}</p>}
 
-      {user?.role === 'admin' && (
+      {isPanelUser(user) && (
         <form className="inline-form" onSubmit={handleAddBook}>
           <h2>Add a book</h2>
           <input
@@ -125,7 +131,7 @@ export default function Books() {
               <button onClick={() => handleBorrow(book._id)} disabled={book.availableCopies < 1}>
                 Borrow
               </button>
-              {user?.role === 'admin' && (
+              {isPanelUser(user) && (
                 <button className="danger" onClick={() => handleDelete(book._id)}>
                   Delete
                 </button>
@@ -135,6 +141,19 @@ export default function Books() {
         ))}
         {books.length === 0 && <p>No books in the catalogue yet.</p>}
       </div>
+
+      {totalPages > 1 && (
+        <div className="card-actions" style={{ justifyContent: 'center', marginTop: '1.5rem' }}>
+          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>
+            Previous
+          </button>
+          <span style={{ padding: '0 0.5rem' }}>Page {page} of {totalPages}</span>
+          <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>
+            Next
+          </button>
+        </div>
+      )}
     </div>
+    </AppShell>
   );
 }
