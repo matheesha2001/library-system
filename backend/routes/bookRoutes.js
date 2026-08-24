@@ -7,6 +7,20 @@ const logAction = require('../utils/auditLog');
 const router = express.Router();
 const staffOrAdmin = requireRole('staff', 'admin');
 
+// Maps a malformed :id (CastError) or a failed schema validator
+// (ValidationError, e.g. a negative totalCopies) to a clean 400 instead of
+// falling through to the generic 500 below - a bad request shouldn't look
+// like a server crash.
+function handleError(err, res) {
+  if (err.name === 'CastError') {
+    return res.status(400).json({ message: 'Invalid book ID' });
+  }
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ message: err.message });
+  }
+  return res.status(500).json({ message: 'Server error', error: err.message });
+}
+
 // GET /api/books - anyone logged in can view
 //
 // Without page/limit/search/availability params, returns the full catalogue
@@ -72,7 +86,7 @@ router.get('/:id', protect, async (req, res) => {
     if (!book) return res.status(404).json({ message: 'Book not found' });
     res.json(book);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    handleError(err, res);
   }
 });
 
@@ -101,7 +115,7 @@ router.post('/', protect, staffOrAdmin, async (req, res) => {
 
     res.status(201).json(book);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    handleError(err, res);
   }
 });
 
@@ -129,7 +143,7 @@ router.put('/:id', protect, staffOrAdmin, async (req, res) => {
     req.io.emit('bookUpdated', book);
     res.json(book);
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    handleError(err, res);
   }
 });
 
@@ -160,7 +174,7 @@ router.delete('/:id', protect, staffOrAdmin, async (req, res) => {
     req.io.emit('bookDeleted', { id: req.params.id });
     res.json({ message: 'Book deleted' });
   } catch (err) {
-    res.status(500).json({ message: 'Server error', error: err.message });
+    handleError(err, res);
   }
 });
 
