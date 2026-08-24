@@ -110,7 +110,11 @@ router.post('/', protect, staffOrAdmin, async (req, res) => {
     });
     await book.populate('category', 'name');
 
-    // Broadcast to all connected clients that the catalogue changed
+    // Catalogue events aren't sensitive and matter to every logged-in
+    // client (members browsing, staff managing) - since the socket
+    // connection itself now requires auth, a plain broadcast here is
+    // correctly scoped as-is, unlike the user-management/borrow-record
+    // events elsewhere which are targeted at specific rooms.
     req.io.emit('bookAdded', book);
 
     res.status(201).json(book);

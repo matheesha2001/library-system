@@ -235,14 +235,30 @@ router.put('/:id/return', protect, async (req, res) => {
         { sort: { requestedAt: 1 } }
       );
       if (nextInLine) {
-        req.io.emit('reservationReady', {
+        // Reaches staff (who act on the queue) and the specific member whose
+        // hold just became ready - not a catalogue-wide event like
+        // availabilityChanged above.
+        req.io.to('staff').to(`user:${nextInLine.member}`).emit('reservationReady', {
           id: nextInLine._id,
           book: record.book,
           member: nextInLine.member,
         });
       }
     }
-    req.io.emit('borrowUpdated', record);
+
+    // Capture the room before populate() below replaces record.member with
+    // a full user object - `user:${<populated object>}` would silently
+    // target the wrong (nonexistent) room.
+    const memberRoom = `user:${record.member}`;
+    await record.populate('book', 'title author');
+    await record.populate('member', 'name email memberId studentId');
+
+    // Reaches staff (the admin borrows view needs every record's updates)
+    // and the borrowing member (their own loan changed) - not everyone.
+    // Populated the same way GET /api/borrow is so listeners (AdminBorrows,
+    // MyBorrows) can merge this straight into their record list without the
+    // book/member columns going blank.
+    req.io.to('staff').to(memberRoom).emit('borrowUpdated', record);
 
     res.json(record);
   } catch (err) {
@@ -263,7 +279,11 @@ router.put('/:id/waive-fine', protect, staffOrAdmin, async (req, res) => {
     record.fineWaivedBy = req.user.id;
     await record.save();
 
-    req.io.emit('borrowUpdated', record);
+    const memberRoom = `user:${record.member}`;
+    await record.populate('book', 'title author');
+    await record.populate('member', 'name email memberId studentId');
+
+    req.io.to('staff').to(memberRoom).emit('borrowUpdated', record);
 
     res.json(record);
   } catch (err) {
@@ -295,7 +315,11 @@ router.put('/:id/extend', protect, staffOrAdmin, async (req, res) => {
     record.renewalRequested = false;
     await record.save();
 
-    req.io.emit('borrowUpdated', record);
+    const memberRoom = `user:${record.member}`;
+    await record.populate('book', 'title author');
+    await record.populate('member', 'name email memberId studentId');
+
+    req.io.to('staff').to(memberRoom).emit('borrowUpdated', record);
 
     res.json(record);
   } catch (err) {
@@ -331,7 +355,11 @@ router.put('/:id/request-renewal', protect, async (req, res) => {
       return res.status(400).json({ message: 'A renewal request is already pending for this loan' });
     }
 
-    req.io.emit('borrowUpdated', updated);
+    const memberRoom = `user:${updated.member}`;
+    await updated.populate('book', 'title author');
+    await updated.populate('member', 'name email memberId studentId');
+
+    req.io.to('staff').to(memberRoom).emit('borrowUpdated', updated);
 
     res.json(updated);
   } catch (err) {
@@ -352,7 +380,11 @@ router.put('/:id/deny-renewal', protect, staffOrAdmin, async (req, res) => {
     record.renewalRequested = false;
     await record.save();
 
-    req.io.emit('borrowUpdated', record);
+    const memberRoom = `user:${record.member}`;
+    await record.populate('book', 'title author');
+    await record.populate('member', 'name email memberId studentId');
+
+    req.io.to('staff').to(memberRoom).emit('borrowUpdated', record);
 
     res.json(record);
   } catch (err) {
@@ -371,7 +403,7 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
       member: record.member,
     });
 
-    req.io.emit('borrowDeleted', { id: req.params.id });
+    req.io.to('staff').to(`user:${record.member}`).emit('borrowDeleted', { id: req.params.id });
 
     res.json({ message: 'Record deleted' });
   } catch (err) {

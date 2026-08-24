@@ -20,6 +20,11 @@ const userSchema = new mongoose.Schema(
       required: function () {
         return !this.githubId;
       },
+      // Never queried by default - only pulled in explicitly by POST
+      // /auth/login (the one place that actually needs to compare it),
+      // matching how resetPasswordTokenHash/resetPasswordExpires below
+      // already do this.
+      select: false,
     },
     githubId: { type: String, unique: true, sparse: true },
     // Never queried by default (select: false) - only pulled in explicitly

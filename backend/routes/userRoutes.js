@@ -108,7 +108,9 @@ router.put('/:id/role', protect, adminOnly, async (req, res) => {
       targetEmail: user.email,
     });
 
-    req.io.emit('userUpdated', { id: user._id, role: user.role });
+    // Management-facing event - only staff/admin have a live user list to
+    // update (see AdminUsers.jsx), so this only needs the staff room.
+    req.io.to('staff').emit('userUpdated', { id: user._id, role: user.role });
 
     res.json(user);
   } catch (err) {
@@ -140,7 +142,7 @@ router.put('/:id/block', protect, staffOrAdmin, async (req, res) => {
       targetEmail: target.email,
     });
 
-    req.io.emit('userUpdated', { id: target._id, isBlocked: true });
+    req.io.to('staff').emit('userUpdated', { id: target._id, isBlocked: true });
 
     res.json({ id: target._id, isBlocked: target.isBlocked });
   } catch (err) {
@@ -167,7 +169,7 @@ router.put('/:id/unblock', protect, staffOrAdmin, async (req, res) => {
       targetEmail: target.email,
     });
 
-    req.io.emit('userUpdated', { id: target._id, isBlocked: false });
+    req.io.to('staff').emit('userUpdated', { id: target._id, isBlocked: false });
 
     res.json({ id: target._id, isBlocked: target.isBlocked });
   } catch (err) {
@@ -203,7 +205,7 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
     });
 
     // Clean up past returned borrow records or keep for log
-    req.io.emit('userDeleted', { id: req.params.id });
+    req.io.to('staff').emit('userDeleted', { id: req.params.id });
 
     res.json({ message: 'User deleted successfully' });
   } catch (err) {

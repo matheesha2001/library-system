@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
+import socket from '../api/socket';
 import AppShell from '../components/AppShell';
 import { useAuth } from '../context/AuthContext';
 import { isOverdue, estimateFine } from '../utils/fines';
@@ -11,6 +12,25 @@ export default function MyBorrows() {
 
   useEffect(() => {
     fetchRecords();
+
+    // Backend scopes these to the member's own room (user:${id}) plus
+    // `staff`, so these only fire for records that belong to this user - a
+    // fine waived, a loan extended/returned, or a renewal approved/denied
+    // by staff all land here live instead of needing a manual refresh.
+    socket.on('borrowUpdated', (updated) => {
+      setRecords((prev) =>
+        prev.map((r) => (r._id === updated._id ? { ...r, ...updated } : r))
+      );
+    });
+
+    socket.on('borrowDeleted', ({ id }) => {
+      setRecords((prev) => prev.filter((r) => r._id !== id));
+    });
+
+    return () => {
+      socket.off('borrowUpdated');
+      socket.off('borrowDeleted');
+    };
   }, []);
 
   async function fetchRecords() {

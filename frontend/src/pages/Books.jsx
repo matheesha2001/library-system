@@ -35,12 +35,41 @@ export default function Books() {
     socket.on('bookAdded', () => fetchBooks());
     socket.on('bookDeleted', () => fetchBooks());
 
+    // Reservation events are scoped server-side to `staff` plus the specific
+    // member's own room - a staff/admin socket is in `staff`, so it gets
+    // every member's event here too. reservationCancelled/reservationReady
+    // only update an entry already in myReservations by id, which is a safe
+    // no-op for a reservation that isn't ours. reservationCreated appends a
+    // new entry though, so it's filtered to the current user - otherwise a
+    // staff member browsing the catalogue would see other members' holds
+    // rendered as their own "Reserved"/"Ready for pickup" state.
+    socket.on('reservationCreated', (reservation) => {
+      const memberId = reservation.member?._id || reservation.member?.id || reservation.member;
+      if (memberId !== user?.id) return;
+      setMyReservations((prev) =>
+        prev.some((r) => r._id === reservation._id) ? prev : [reservation, ...prev]
+      );
+    });
+
+    socket.on('reservationCancelled', ({ id }) => {
+      setMyReservations((prev) => prev.filter((r) => r._id !== id));
+    });
+
+    socket.on('reservationReady', ({ id }) => {
+      setMyReservations((prev) =>
+        prev.map((r) => (r._id === id ? { ...r, status: 'ready' } : r))
+      );
+    });
+
     return () => {
       socket.off('availabilityChanged');
       socket.off('bookAdded');
       socket.off('bookDeleted');
+      socket.off('reservationCreated');
+      socket.off('reservationCancelled');
+      socket.off('reservationReady');
     };
-  }, [page]);
+  }, [page, user]);
 
   async function fetchBooks() {
     try {

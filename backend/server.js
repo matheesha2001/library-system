@@ -1,11 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const http = require('http');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 const { Server } = require('socket.io');
 const connectDB = require('./config/db');
+const { verifyToken } = require('./middleware/auth');
 
 const authRoutes = require('./routes/authRoutes');
 const bookRoutes = require('./routes/bookRoutes');
@@ -27,10 +29,46 @@ const io = new Server(server, {
   cors: { origin: process.env.CLIENT_URL || '*' },
 });
 
+// Requires the same JWT a client uses for the REST API, sent via
+// socket.handshake.auth.token - verified the same way protect() verifies it
+// (see verifyToken() in middleware/auth.js), so an unauthenticated or
+// blocked client can't open a socket at all.
+io.use(async (socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) {
+    return next(new Error('Not authorized, no token provided'));
+  }
+
+  try {
+    socket.user = await verifyToken(token); // { id, role }
+    next();
+  } catch (err) {
+    next(new Error(err.message));
+  }
+});
+
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  // Every socket joins a personal room so member-specific events (their own
+  // borrow/reservation/fine updates) can be targeted at just them instead of
+  // broadcast to everyone. Staff/admin additionally join a shared room for
+  // management-facing events (user blocks/deletes, role changes) that only
+  // staff/admin should see live.
+  socket.join(`user:${socket.user.id}`);
+  if (['staff', 'admin'].includes(socket.user.role)) {
+    socket.join('staff');
+  }
+
+  console.log('Client connected:', socket.id, '- user', socket.user.id);
   socket.on('disconnect', () => console.log('Client disconnected:', socket.id));
 });
+
+// Standard security headers (XSS protection, no-sniff, etc.) - applied
+// before anything else touches the response. crossOriginResourcePolicy is
+// relaxed from helmet's 'same-origin' default because this API and the SPA
+// frontend are intentionally different origins (see the CORS setup below),
+// and profile pictures under /uploads are loaded cross-origin via plain
+// <img> tags - the stricter default would silently block those.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // Make io accessible inside route handlers via req.io
 app.use((req, res, next) => {
@@ -38,7 +76,9 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors());
+// Restricted to CLIENT_URL, matching Socket.io's CORS setup above - a wide
+// open cors() let any origin call this API with credentials-free requests.
+app.use(cors({ origin: process.env.CLIENT_URL || '*' }));
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

@@ -1,8 +1,10 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs/promises');
 const multer = require('multer');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
+const { SUPPORTED_IMAGE_TYPES, detectImageExtension } = require('../utils/imageSignature');
 
 const router = express.Router();
 
@@ -12,31 +14,19 @@ const router = express.Router();
 // browser besides Safari can decode it - it uploads "successfully" and then
 // just never displays. Reject it here with a clear message instead.
 //
-// Maps each accepted mimetype to a fixed extension. The stored filename's
-// extension always comes from this map (keyed by the mimetype fileFilter
-// already validated), NEVER from the client-supplied originalname - otherwise
-// a request could declare an allowed mimetype (e.g. image/png) alongside a
-// mismatched filename like "x.svg" and get the file stored/served with that
-// extension instead, regardless of what was actually validated.
-const SUPPORTED_IMAGE_TYPES = {
-  'image/jpeg': '.jpg',
-  'image/png': '.png',
-  'image/gif': '.gif',
-  'image/webp': '.webp',
-};
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '..', 'uploads', 'profiles'));
-  },
-  filename: (req, file, cb) => {
-    const ext = SUPPORTED_IMAGE_TYPES[file.mimetype] || '';
-    cb(null, `${req.user.id}-${Date.now()}${ext}`);
-  },
-});
-
+// This is only a cheap first pass on the client-declared mimetype, so an
+// obviously-wrong upload never gets buffered into memory at all - it is NOT
+// trusted for anything past that. The actual accept/reject decision, and the
+// extension used for the stored filename, come from detectImageExtension()
+// in the route handler below, which checks the real bytes instead. A
+// request could otherwise declare an allowed mimetype (e.g. image/png)
+// while the content is something else entirely and get it saved/served
+// under a mismatched extension - or saved at all.
+//
+// memoryStorage (not diskStorage) so the buffer is available for that check
+// before anything is written to disk.
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
     if (!SUPPORTED_IMAGE_TYPES[file.mimetype]) {
@@ -99,8 +89,20 @@ router.post('/picture', protect, (req, res) => {
       return res.status(400).json({ message: 'No image file provided' });
     }
 
+    // The declared mimetype only passed the cheap fileFilter check above -
+    // that's just what the client claimed. Verify the actual bytes match a
+    // real image signature before this file is trusted with anything,
+    // including the extension it gets stored under.
+    const ext = detectImageExtension(req.file.buffer);
+    if (!ext) {
+      return res.status(400).json({ message: 'The uploaded file is not a valid JPG, PNG, GIF, or WebP image.' });
+    }
+
     try {
-      const profilePicture = `/uploads/profiles/${req.file.filename}`;
+      const filename = `${req.user.id}-${Date.now()}${ext}`;
+      await fs.writeFile(path.join(__dirname, '..', 'uploads', 'profiles', filename), req.file.buffer);
+
+      const profilePicture = `/uploads/profiles/${filename}`;
       const user = await User.findByIdAndUpdate(
         req.user.id,
         { profilePicture },

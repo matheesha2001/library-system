@@ -31,7 +31,9 @@ router.post('/', protect, async (req, res) => {
     const reservation = await Reservation.create({ book: bookId, member: req.user.id });
     await reservation.populate('book', 'title author');
 
-    req.io.emit('reservationCreated', reservation);
+    // Reaches staff (who manage the reservation queue) and the member who
+    // just placed the hold - not a catalogue-wide event.
+    req.io.to('staff').to(`user:${req.user.id}`).emit('reservationCreated', reservation);
 
     res.status(201).json(reservation);
   } catch (err) {
@@ -83,7 +85,7 @@ router.put('/:id/cancel', protect, async (req, res) => {
     reservation.status = 'cancelled';
     await reservation.save();
 
-    req.io.emit('reservationCancelled', { id: reservation._id, book: reservation.book });
+    req.io.to('staff').to(`user:${reservation.member}`).emit('reservationCancelled', { id: reservation._id, book: reservation.book });
 
     res.json(reservation);
   } catch (err) {
