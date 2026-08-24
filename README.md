@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Library Management System
 
 Full-stack practice project (PUSL3120 style brief) — React frontend, Node.js/Express backend, MongoDB database, real-time updates via Socket.io.
@@ -65,3 +66,6 @@ npm test
 - Database: MongoDB (Atlas)
 - Testing: Jest, Supertest
 # library-system
+=======
+# library-system
+>>>>>>> 70d8f2670565067a149b5c2763624c387397f248
