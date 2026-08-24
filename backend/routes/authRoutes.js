@@ -106,30 +106,30 @@ router.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ message: 'Email is required' });
 
-    const user = await User.findOne({ email });
-    // Same response whether or not the account exists, so this endpoint
-    // can't be used to check which emails are registered.
+    // Same response whether or not the account exists - both the message
+    // AND the response shape have to stay identical, or the shape itself
+    // becomes an oracle for account existence (e.g. a client checking
+    // `if (resetLink)` could otherwise fingerprint registered emails even
+    // with an identical message). That's why resetLink/resetToken are never
+    // included in the response below, regardless of which branch runs here.
     const genericMessage = 'If that email is registered, a password reset link has been generated.';
-    if (!user) {
-      return res.json({ message: genericMessage });
+    const user = await User.findOne({ email });
+
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      user.resetPasswordTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+      user.resetPasswordExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+      await user.save();
+
+      const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
+
+      // TEMPORARY: no email service is configured yet, so the reset link is
+      // only logged server-side for now - replace this with an actual email
+      // send once a mail provider is wired up.
+      console.log(`Password reset link for ${email}: ${resetLink}`);
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    user.resetPasswordTokenHash = crypto.createHash('sha256').update(token).digest('hex');
-    user.resetPasswordExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
-    await user.save();
-
-    const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
-
-    // TEMPORARY: no email service is configured yet, so the reset link is
-    // logged server-side and returned directly in the API response instead
-    // of being emailed. This is NOT safe for a real deployment (anyone who
-    // can see the response can reset that account's password) - replace
-    // with an actual email send once a mail provider is wired up, and stop
-    // returning resetLink/resetToken in the response at that point.
-    console.log(`Password reset link for ${email}: ${resetLink}`);
-
-    res.json({ message: genericMessage, resetLink, resetToken: token });
+    res.json({ message: genericMessage });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

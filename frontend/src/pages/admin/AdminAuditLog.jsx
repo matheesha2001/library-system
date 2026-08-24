@@ -16,7 +16,10 @@ const ACTION_LABELS = Object.fromEntries(ACTIONS.map((a) => [a.value, a.label]))
 
 function targetSummary(entry) {
   const d = entry.details || {};
-  if (entry.action === 'user.roleChange') return `${d.from} → ${d.to}`;
+  if (entry.action === 'user.roleChange') {
+    const who = d.targetName || d.targetEmail;
+    return who ? `${who}: ${d.from} → ${d.to}` : `${d.from} → ${d.to}`;
+  }
   if (d.targetName || d.targetEmail) return d.targetName || d.targetEmail;
   if (d.title) return `${d.title}${d.isbn ? ` (${d.isbn})` : ''}`;
   return entry.targetId;

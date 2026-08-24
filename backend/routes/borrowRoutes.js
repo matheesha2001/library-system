@@ -65,6 +65,24 @@ function fulfillReservation(bookId, memberId) {
   );
 }
 
+// A reservation flagged "ready" is supposed to earmark the next freed-up
+// copy for that specific member - without this check, availableCopies is
+// just a shared pool and any other member could still claim it first,
+// defeating the whole point of having been next in line. A member is only
+// blocked here if someone ELSE'S ready reservation is outstanding; their own
+// ready reservation (if any) always lets them straight through. This is a
+// plain sequential pre-check rather than something folded into claimCopy's
+// atomic update - safe because it can only ever produce an extra rejection,
+// never a wrongful grant: the actual copy-claim below is still fully
+// serialized through claimCopy()'s atomic $gt:0 guard.
+async function isBlockedByReadyReservation(bookId, memberId) {
+  const ownReadyReservation = await Reservation.exists({ book: bookId, member: memberId, status: 'ready' });
+  if (ownReadyReservation) return false;
+
+  const heldForSomeoneElse = await Reservation.exists({ book: bookId, status: 'ready', member: { $ne: memberId } });
+  return Boolean(heldForSomeoneElse);
+}
+
 // GET /api/borrow - staff/admin see all, member sees only their own
 router.get('/', protect, async (req, res) => {
   try {
@@ -87,6 +105,12 @@ router.post('/', protect, async (req, res) => {
     if (await isAtBorrowLimit(req.user.id)) {
       return res.status(400).json({
         message: `You've reached the maximum of ${MAX_BOOKS_PER_MEMBER} borrowed books at once. Return a book before borrowing another.`,
+      });
+    }
+
+    if (await isBlockedByReadyReservation(bookId, req.user.id)) {
+      return res.status(400).json({
+        message: 'This copy is reserved for another member whose hold is ready for pickup.',
       });
     }
 
@@ -135,6 +159,12 @@ router.post('/issue', protect, staffOrAdmin, async (req, res) => {
     if (await isAtBorrowLimit(memberId)) {
       return res.status(400).json({
         message: `This member already has the maximum of ${MAX_BOOKS_PER_MEMBER} borrowed books. Process a return before issuing another.`,
+      });
+    }
+
+    if (await isBlockedByReadyReservation(bookId, memberId)) {
+      return res.status(400).json({
+        message: 'This copy is reserved for another member whose hold is ready for pickup.',
       });
     }
 
@@ -248,6 +278,11 @@ router.put('/:id/waive-fine', protect, staffOrAdmin, async (req, res) => {
 router.put('/:id/extend', protect, staffOrAdmin, async (req, res) => {
   try {
     const { days = 7 } = req.body;
+    const daysNum = Number(days);
+    if (!Number.isInteger(daysNum) || daysNum < 1 || daysNum > 30) {
+      return res.status(400).json({ message: 'days must be a whole number between 1 and 30' });
+    }
+
     const record = await BorrowRecord.findById(req.params.id);
     if (!record) return res.status(404).json({ message: 'Record not found' });
     if (record.returnDate) {
@@ -255,7 +290,7 @@ router.put('/:id/extend', protect, staffOrAdmin, async (req, res) => {
     }
 
     const currentDue = new Date(record.dueDate || Date.now());
-    currentDue.setDate(currentDue.getDate() + Number(days));
+    currentDue.setDate(currentDue.getDate() + daysNum);
     record.dueDate = currentDue;
     record.renewalRequested = false;
     await record.save();
@@ -282,17 +317,23 @@ router.put('/:id/request-renewal', protect, async (req, res) => {
     if (record.returnDate) {
       return res.status(400).json({ message: 'Cannot request a renewal for a returned book' });
     }
-    if (record.renewalRequested) {
+
+    // Atomically flip renewalRequested only if it's still false - the same
+    // check-and-set-in-one-query pattern as claimCopy() above, so two
+    // concurrent renewal requests on the same record can't both pass the
+    // "not already pending" check before either one writes.
+    const updated = await BorrowRecord.findOneAndUpdate(
+      { _id: req.params.id, renewalRequested: false },
+      { renewalRequested: true, renewalRequestedAt: new Date() },
+      { new: true }
+    );
+    if (!updated) {
       return res.status(400).json({ message: 'A renewal request is already pending for this loan' });
     }
 
-    record.renewalRequested = true;
-    record.renewalRequestedAt = new Date();
-    await record.save();
+    req.io.emit('borrowUpdated', updated);
 
-    req.io.emit('borrowUpdated', record);
-
-    res.json(record);
+    res.json(updated);
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

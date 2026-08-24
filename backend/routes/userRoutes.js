@@ -104,6 +104,8 @@ router.put('/:id/role', protect, adminOnly, async (req, res) => {
     await logAction(req.user.id, 'user.roleChange', 'User', user._id, {
       from: previous.role,
       to: user.role,
+      targetName: user.name,
+      targetEmail: user.email,
     });
 
     req.io.emit('userUpdated', { id: user._id, role: user.role });

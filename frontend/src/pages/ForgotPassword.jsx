@@ -7,23 +7,15 @@ export default function ForgotPassword() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  // TEMPORARY: no email service is configured yet, so the backend returns
-  // the reset link directly in the response instead of emailing it (see
-  // backend/routes/authRoutes.js POST /forgot-password). Showing it here is
-  // a stand-in so the flow is actually usable end-to-end until a real mail
-  // provider is wired up - remove this once that happens.
-  const [devResetLink, setDevResetLink] = useState('');
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setMessage('');
-    setDevResetLink('');
     setLoading(true);
     try {
       const res = await api.post('/auth/forgot-password', { email });
       setMessage(res.data.message);
-      if (res.data.resetLink) setDevResetLink(res.data.resetLink);
     } catch (err) {
       setError(err.response?.data?.message || 'Something went wrong. Please try again.');
     } finally {
@@ -49,14 +41,14 @@ export default function ForgotPassword() {
         {message && (
           <div className="flex flex-col gap-2 rounded-lg bg-secondary-container dark:bg-emerald-950/60 border border-secondary/30 px-3 py-3 text-center">
             <p className="font-body-md text-body-md text-on-secondary-container dark:text-emerald-300">{message}</p>
-            {devResetLink && (
-              <p className="font-body-sm text-xs text-on-secondary-container dark:text-emerald-300">
-                No email service is set up yet, so here&apos;s your link directly:{' '}
-                <Link to={devResetLink.replace(window.location.origin, '')} className="underline font-semibold break-all">
-                  {devResetLink}
-                </Link>
-              </p>
-            )}
+            {/* TEMPORARY: no email service is configured yet, so the reset
+                link is only logged to the backend server console (see
+                backend/routes/authRoutes.js POST /forgot-password) rather
+                than being emailed or returned here - remove this note once a
+                real mail provider is wired up. */}
+            <p className="font-body-sm text-xs text-on-secondary-container dark:text-emerald-300">
+              No email service is set up yet - check the backend server console for the reset link.
+            </p>
           </div>
         )}
 
