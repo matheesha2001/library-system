@@ -184,15 +184,16 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
       return res.status(400).json({ message: 'You cannot delete your own account from admin panel.' });
     }
 
-    // Check if user has active borrowed books
-    const activeBorrows = await BorrowRecord.countDocuments({
-      member: req.params.id,
-      returnDate: null,
-    });
-
-    if (activeBorrows > 0) {
+    // Same protective pattern as book/category deletion: block deletion
+    // while ANY borrow record - active or historical/returned - still
+    // references this user, so BorrowRecord.member never ends up pointing
+    // at a deleted document. Unlike an active loan, a returned record can't
+    // be resolved by "process returns first" - the admin has to actually
+    // remove those records (Manage Borrows) if they want this user gone.
+    const borrowCount = await BorrowRecord.countDocuments({ member: req.params.id });
+    if (borrowCount > 0) {
       return res.status(400).json({
-        message: `Cannot delete user with ${activeBorrows} unreturned book(s). Please process returns first.`,
+        message: `Cannot delete this user - ${borrowCount} borrow record(s) (active or past) reference this account. Delete those records first from Manage Borrows if you want to remove this user entirely.`,
       });
     }
 
@@ -204,7 +205,6 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
       targetEmail: user.email,
     });
 
-    // Clean up past returned borrow records or keep for log
     req.io.to('staff').emit('userDeleted', { id: req.params.id });
 
     res.json({ message: 'User deleted successfully' });

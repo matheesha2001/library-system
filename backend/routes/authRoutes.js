@@ -1,5 +1,5 @@
 const express = require('express');
-const axios = require('axios');
+const { OAuth2Client } = require('google-auth-library');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
@@ -9,6 +9,16 @@ const { protect } = require('../middleware/auth');
 const generateMemberId = require('../utils/memberId');
 
 const router = express.Router();
+
+// One client instance reused across the /google and /google/callback routes
+// below - it already knows this app's clientId/clientSecret/redirectUri, so
+// individual calls only need to pass the request-specific bits (scopes,
+// the authorization code).
+const googleClient = new OAuth2Client({
+  clientId: process.env.GOOGLE_CLIENT_ID,
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+  redirectUri: process.env.GOOGLE_CALLBACK_URL,
+});
 
 // Stricter limit on login specifically, to slow down credential stuffing -
 // only failed attempts count against it, so a legitimate user logging in
@@ -70,15 +80,30 @@ router.post('/login', loginLimiter, async (req, res) => {
     // password is select: false on the model now - explicitly requested
     // here since this is the one route that actually needs to compare it.
     const user = await User.findOne({ email }).select('+password');
+
+    // TEMP DEBUG - remove after diagnosing the mathiya040@gmail.com login issue.
+    console.log('[login debug]', {
+      emailSubmitted: email,
+      userFound: !!user,
+      hasPasswordSet: user ? !!user.password : null,
+      role: user ? user.role : null,
+      isBlocked: user ? user.isBlocked : null,
+      note: 'role is NOT checked by this route - any valid role can log in here',
+    });
+
     if (!user) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
     if (!user.password) {
-      return res.status(400).json({ message: "This account uses GitHub sign-in. Please use the 'Sign in with GitHub' button." });
+      return res.status(400).json({ message: "This account uses Google sign-in. Please use the 'Sign in with Google' button." });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
+
+    // TEMP DEBUG - remove after diagnosing.
+    console.log('[login debug] password match result:', isMatch);
+
     if (!isMatch) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
@@ -181,73 +206,53 @@ router.get('/me', protect, async (req, res) => {
   }
 });
 
-// GET /api/auth/github - redirect the browser to GitHub's authorize page
-router.get('/github', (req, res) => {
-  const params = new URLSearchParams({
-    client_id: process.env.GITHUB_CLIENT_ID,
-    redirect_uri: process.env.GITHUB_CALLBACK_URL,
-    scope: 'read:user user:email',
+// GET /api/auth/google - redirect the browser to Google's consent screen
+router.get('/google', (req, res) => {
+  const url = googleClient.generateAuthUrl({
+    scope: ['openid', 'email', 'profile'],
   });
-  res.redirect(`https://github.com/login/oauth/authorize?${params}`);
+  res.redirect(url);
 });
 
-// GET /api/auth/github/callback - GitHub redirects back here with a temporary code
-router.get('/github/callback', async (req, res) => {
+// GET /api/auth/google/callback - Google redirects back here with a temporary code
+router.get('/google/callback', async (req, res) => {
   const { code } = req.query;
 
   if (!code) {
-    return res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
+    return res.redirect(`${process.env.CLIENT_URL}/login?error=google_auth_failed`);
   }
 
   try {
-    // Exchange the temporary code for an access token
-    const tokenRes = await axios.post(
-      'https://github.com/login/oauth/access_token',
-      {
-        client_id: process.env.GITHUB_CLIENT_ID,
-        client_secret: process.env.GITHUB_CLIENT_SECRET,
-        code,
-        redirect_uri: process.env.GITHUB_CALLBACK_URL,
-      },
-      { headers: { Accept: 'application/json' } }
-    );
+    // Exchange the temporary code for tokens. Unlike GitHub (a plain access
+    // token used to make separate REST calls for profile/email), Google's
+    // token response includes a signed ID token that carries the profile
+    // claims directly - verifyIdToken checks its signature against Google's
+    // public keys and its audience against our own client ID, so the
+    // payload can be trusted without a second API round-trip.
+    const { tokens } = await googleClient.getToken(code);
 
-    const accessToken = tokenRes.data.access_token;
-    if (!accessToken) {
-      return res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
+    const ticket = await googleClient.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const { sub: googleId, email, name } = ticket.getPayload();
+
+    if (!email) {
+      // Every Google account has a verified email backing it (unlike
+      // GitHub, where a private/unset email is possible), so this should be
+      // unreachable in practice - kept as a defensive fallback rather than
+      // assuming the payload shape.
+      return res.redirect(`${process.env.CLIENT_URL}/login?error=google_no_email`);
     }
 
-    // Fetch the GitHub profile + email
-    const profileRes = await axios.get('https://api.github.com/user', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    const emailsRes = await axios.get('https://api.github.com/user/emails', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    // Prefer the email GitHub flags as primary; fall back to any verified
-    // email in the list before giving up - some accounts don't return
-    // exactly one primary-flagged entry even though the API contract implies
-    // they should.
-    const primaryEmail = emailsRes.data.find((e) => e.primary)?.email || emailsRes.data[0]?.email || null;
-    const { id: githubId, login, avatar_url, name } = profileRes.data;
-
-    // Find or create the local user, matched by githubId
-    let user = await User.findOne({ githubId });
+    // Find or create the local user, matched by googleId
+    let user = await User.findOne({ googleId });
     if (!user) {
-      if (!primaryEmail) {
-        // User.js allows email to be omitted for GitHub accounts (matching
-        // the same conditional-required pattern as password), so this isn't
-        // strictly required to avoid a crash - but signing someone up with no
-        // email at all would be a confusing, degraded account, so surface a
-        // specific, actionable error instead.
-        return res.redirect(`${process.env.CLIENT_URL}/login?error=github_no_email`);
-      }
       user = await User.create({
-        githubId,
+        googleId,
         memberId: await generateMemberId(),
-        name: name || login,
-        email: primaryEmail,
+        name: name || email,
+        email,
         role: 'member',
       });
     }
@@ -261,8 +266,8 @@ router.get('/github/callback', async (req, res) => {
 
     res.redirect(`${process.env.CLIENT_URL}/oauth-success?token=${token}`);
   } catch (err) {
-    console.error('GitHub OAuth error:', err.response?.data || err.message);
-    res.redirect(`${process.env.CLIENT_URL}/login?error=github_auth_failed`);
+    console.error('Google OAuth error:', err.response?.data || err.message);
+    res.redirect(`${process.env.CLIENT_URL}/login?error=google_auth_failed`);
   }
 });
 

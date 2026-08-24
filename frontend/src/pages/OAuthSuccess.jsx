@@ -12,7 +12,7 @@ export default function OAuthSuccess() {
     const token = searchParams.get('token');
 
     if (!token) {
-      navigate('/login?error=github_auth_failed', { replace: true });
+      navigate('/login?error=google_auth_failed', { replace: true });
       return;
     }
 
@@ -24,7 +24,7 @@ export default function OAuthSuccess() {
         login(res.data, token);
         navigate('/dashboard', { replace: true });
       } catch (err) {
-        navigate('/login?error=github_auth_failed', { replace: true });
+        navigate('/login?error=google_auth_failed', { replace: true });
       }
     }
 
@@ -34,7 +34,7 @@ export default function OAuthSuccess() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-primary dark:bg-slate-950 text-on-primary">
-      <p className="font-body-md text-body-md text-on-primary">Signing you in with GitHub&hellip;</p>
+      <p className="font-body-md text-body-md text-on-primary">Signing you in with Google&hellip;</p>
     </main>
   );
 }
