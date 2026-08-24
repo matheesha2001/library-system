@@ -151,6 +151,15 @@ export default function AdminBorrows() {
     }
   }
 
+  async function handleDenyRenewal(recordId) {
+    try {
+      await api.put(`/borrow/${recordId}/deny-renewal`);
+      fetchBorrows();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to deny renewal request.');
+    }
+  }
+
   function openIssueModal() {
     setIssueForm({ bookId: '', memberId: '', dueDate: defaultDueDate() });
     setBookSearch('');
@@ -196,6 +205,7 @@ export default function AdminBorrows() {
     if (statusFilter === 'active') return matchesSearch && isActive;
     if (statusFilter === 'overdue') return matchesSearch && isOverdue;
     if (statusFilter === 'returned') return matchesSearch && isReturned;
+    if (statusFilter === 'renewal') return matchesSearch && r.renewalRequested && !isReturned;
     return matchesSearch;
   });
 
@@ -244,7 +254,7 @@ export default function AdminBorrows() {
           </div>
 
           <div className="flex items-center gap-1 bg-surface-container-low dark:bg-slate-900 p-1 rounded-lg border border-outline-variant dark:border-slate-700 overflow-x-auto w-full sm:w-auto">
-            {['all', 'active', 'overdue', 'returned'].map((tab) => (
+            {['all', 'active', 'overdue', 'renewal', 'returned'].map((tab) => (
               <button
                 key={tab}
                 onClick={() => {
@@ -303,6 +313,12 @@ export default function AdminBorrows() {
                           <p className="font-body-sm text-xs text-on-surface-variant dark:text-slate-400">
                             by {r.book?.author || 'N/A'}
                           </p>
+                          {r.renewalRequested && !isReturned && (
+                            <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full font-label-sm text-[11px] font-semibold bg-tertiary/10 dark:bg-amber-950/60 text-tertiary dark:text-amber-300">
+                              <span className="material-symbols-outlined text-[12px]">hourglass_top</span>
+                              Renewal requested
+                            </span>
+                          )}
                         </td>
                         <td className="py-3.5 px-4">
                           <p className="font-label-md font-semibold text-on-surface dark:text-slate-100">
@@ -396,6 +412,16 @@ export default function AdminBorrows() {
                                 >
                                   Extend
                                 </button>
+                                {r.renewalRequested && (
+                                  <button
+                                    onClick={() => handleDenyRenewal(r._id)}
+                                    className="px-2.5 py-1 rounded bg-error/10 dark:bg-rose-950/60 text-error dark:text-rose-300 hover:bg-error/20 dark:hover:bg-rose-900/60 font-label-sm text-xs font-semibold transition-colors"
+                                    title="Deny the pending renewal request"
+                                    type="button"
+                                  >
+                                    Deny
+                                  </button>
+                                )}
                               </>
                             )}
                             {isAdmin(user) && (

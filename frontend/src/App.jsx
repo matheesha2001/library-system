@@ -6,7 +6,10 @@ import AdminRoute from './components/AdminRoute';
 import AdminOnlyRoute from './components/AdminOnlyRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
 import OAuthSuccess from './pages/OAuthSuccess';
+import NotFound from './pages/NotFound';
 import Dashboard from './pages/Dashboard';
 import Books from './pages/Books';
 import MyBorrows from './pages/MyBorrows';
@@ -17,6 +20,7 @@ import AdminCategories from './pages/admin/AdminCategories';
 import AdminUsers from './pages/admin/AdminUsers';
 import AdminBorrows from './pages/admin/AdminBorrows';
 import AdminReports from './pages/admin/AdminReports';
+import AdminAuditLog from './pages/admin/AdminAuditLog';
 
 export default function App() {
   return (
@@ -27,6 +31,8 @@ export default function App() {
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/oauth-success" element={<OAuthSuccess />} />
           <Route
             path="/dashboard"
@@ -109,6 +115,15 @@ export default function App() {
               </AdminRoute>
             }
           />
+          <Route
+            path="/admin/audit-log"
+            element={
+              <AdminOnlyRoute>
+                <AdminAuditLog />
+              </AdminOnlyRoute>
+            }
+          />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

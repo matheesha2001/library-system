@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
 const { protect } = require('../middleware/auth');
@@ -94,6 +95,74 @@ router.post('/login', loginLimiter, async (req, res) => {
       token,
       user: { id: user._id, name: user.name, memberId: user.memberId, studentId: user.studentId, email: user.email, role: user.role, profilePicture: user.profilePicture },
     });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Email is required' });
+
+    const user = await User.findOne({ email });
+    // Same response whether or not the account exists, so this endpoint
+    // can't be used to check which emails are registered.
+    const genericMessage = 'If that email is registered, a password reset link has been generated.';
+    if (!user) {
+      return res.json({ message: genericMessage });
+    }
+
+    const token = crypto.randomBytes(32).toString('hex');
+    user.resetPasswordTokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    user.resetPasswordExpires = new Date(Date.now() + 30 * 60 * 1000); // 30 minutes
+    await user.save();
+
+    const resetLink = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
+
+    // TEMPORARY: no email service is configured yet, so the reset link is
+    // logged server-side and returned directly in the API response instead
+    // of being emailed. This is NOT safe for a real deployment (anyone who
+    // can see the response can reset that account's password) - replace
+    // with an actual email send once a mail provider is wired up, and stop
+    // returning resetLink/resetToken in the response at that point.
+    console.log(`Password reset link for ${email}: ${resetLink}`);
+
+    res.json({ message: genericMessage, resetLink, resetToken: token });
+  } catch (err) {
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ message: 'Token and new password are required' });
+    }
+    if (password.length < 8) {
+      return res.status(400).json({ message: 'Password must be at least 8 characters' });
+    }
+
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const user = await User.findOne({
+      resetPasswordTokenHash: tokenHash,
+      resetPasswordExpires: { $gt: new Date() },
+    }).select('+resetPasswordTokenHash +resetPasswordExpires');
+
+    if (!user) {
+      return res.status(400).json({ message: 'This password reset link is invalid or has expired' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+    user.resetPasswordTokenHash = undefined;
+    user.resetPasswordExpires = undefined;
+    await user.save();
+
+    res.json({ message: 'Password has been reset. You can now sign in with your new password.' });
   } catch (err) {
     res.status(500).json({ message: 'Server error', error: err.message });
   }

@@ -16,6 +16,10 @@ const borrowRecordSchema = new mongoose.Schema(
     fineAmount: { type: Number, default: 0 },
     fineWaived: { type: Boolean, default: false },
     fineWaivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    // Set by the member via PUT /:id/request-renewal, cleared by staff either
+    // approving it (PUT /:id/extend) or denying it (PUT /:id/deny-renewal).
+    renewalRequested: { type: Boolean, default: false },
+    renewalRequestedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

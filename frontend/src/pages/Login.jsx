@@ -4,10 +4,16 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { isPanelUser } from '../utils/permissions';
 
-const OAUTH_ERROR_MESSAGES = {
+// Keyed by the `?error=` value a redirect can land on this page with -
+// either from the GitHub OAuth callback (backend/routes/authRoutes.js) or
+// from the API client's own 401 interceptor (api/client.js).
+const LOGIN_ERROR_MESSAGES = {
   github_no_email: "GitHub didn't provide an email address for your account. Make sure your GitHub account has a verified, public email, or sign in with email and password instead.",
   github_auth_failed: 'GitHub sign-in failed. Please try again, or sign in with email and password.',
+  session_expired: 'Your session has expired. Please sign in again.',
 };
+
+const GITHUB_LOGIN_URL = `${api.defaults.baseURL}/auth/github`;
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -22,9 +28,9 @@ export default function Login() {
   const [searchParams] = useSearchParams();
 
   useEffect(() => {
-    const oauthError = searchParams.get('error');
-    if (oauthError) {
-      setError(OAUTH_ERROR_MESSAGES[oauthError] || 'Sign-in failed. Please try again.');
+    const urlError = searchParams.get('error');
+    if (urlError) {
+      setError(LOGIN_ERROR_MESSAGES[urlError] || 'Sign-in failed. Please try again.');
     }
   }, [searchParams]);
 
@@ -140,7 +146,7 @@ export default function Login() {
               />
               <span className="font-body-md text-body-md text-on-surface-variant dark:text-slate-400">Remember me</span>
             </label>
-            <a className="font-label-md text-label-md text-primary dark:text-sky-400 hover:underline focus:outline-none focus:underline" href="#">Forgot password?</a>
+            <Link className="font-label-md text-label-md text-primary dark:text-sky-400 hover:underline focus:outline-none focus:underline" to="/forgot-password">Forgot password?</Link>
           </div>
 
           <button
@@ -152,6 +158,22 @@ export default function Login() {
             {!loading && <span className="material-symbols-outlined text-[18px]">arrow_forward</span>}
           </button>
         </form>
+
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-outline-variant dark:bg-slate-700" />
+          <span className="font-label-md text-label-md text-on-surface-variant dark:text-slate-400">or</span>
+          <div className="h-px flex-1 bg-outline-variant dark:bg-slate-700" />
+        </div>
+
+        <a
+          href={GITHUB_LOGIN_URL}
+          className="w-full py-3 px-4 bg-surface-container-low dark:bg-slate-900 border border-outline-variant dark:border-slate-700 text-on-surface dark:text-slate-100 font-label-md text-label-md rounded-lg hover:bg-surface-variant/50 dark:hover:bg-slate-700 transition-colors flex justify-center items-center gap-2"
+        >
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+          </svg>
+          Sign in with GitHub
+        </a>
 
         <div className="text-center pt-stack-md border-t border-outline-variant/30 dark:border-slate-700">
           <p className="font-body-md text-body-md text-on-surface-variant dark:text-slate-400">

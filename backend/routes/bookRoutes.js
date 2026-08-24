@@ -2,6 +2,7 @@ const express = require('express');
 const Book = require('../models/Book');
 const BorrowRecord = require('../models/BorrowRecord');
 const { protect, requireRole } = require('../middleware/auth');
+const logAction = require('../utils/auditLog');
 
 const router = express.Router();
 const staffOrAdmin = requireRole('staff', 'admin');
@@ -150,6 +151,11 @@ router.delete('/:id', protect, staffOrAdmin, async (req, res) => {
 
     const book = await Book.findByIdAndDelete(req.params.id);
     if (!book) return res.status(404).json({ message: 'Book not found' });
+
+    await logAction(req.user.id, 'book.delete', 'Book', book._id, {
+      title: book.title,
+      isbn: book.isbn,
+    });
 
     req.io.emit('bookDeleted', { id: req.params.id });
     res.json({ message: 'Book deleted' });

@@ -15,6 +15,8 @@ const reportRoutes = require('./routes/reportRoutes');
 const userRoutes = require('./routes/userRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
 const staffRoutes = require('./routes/staffRoutes');
+const reservationRoutes = require('./routes/reservationRoutes');
+const auditRoutes = require('./routes/auditRoutes');
 
 const app = express();
 const server = http.createServer(app);
@@ -61,6 +63,8 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/staff', staffRoutes);
+app.use('/api/reservations', reservationRoutes);
+app.use('/api/audit-log', auditRoutes);
 
 app.get('/', (req, res) => res.json({ message: 'Library System API is running' }));
 

@@ -2,6 +2,7 @@ const express = require('express');
 const User = require('../models/User');
 const BorrowRecord = require('../models/BorrowRecord');
 const { protect, adminOnly, requireRole } = require('../middleware/auth');
+const logAction = require('../utils/auditLog');
 
 const router = express.Router();
 const staffOrAdmin = requireRole('staff', 'admin');
@@ -91,13 +92,19 @@ router.put('/:id/role', protect, adminOnly, async (req, res) => {
       return res.status(400).json({ message: 'You cannot remove your own admin privileges.' });
     }
 
+    const previous = await User.findById(req.params.id).select('role');
+    if (!previous) return res.status(404).json({ message: 'User not found' });
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { role },
       { new: true }
     ).select('-password');
 
-    if (!user) return res.status(404).json({ message: 'User not found' });
+    await logAction(req.user.id, 'user.roleChange', 'User', user._id, {
+      from: previous.role,
+      to: user.role,
+    });
 
     req.io.emit('userUpdated', { id: user._id, role: user.role });
 
@@ -126,6 +133,11 @@ router.put('/:id/block', protect, staffOrAdmin, async (req, res) => {
     target.isBlocked = true;
     await target.save();
 
+    await logAction(req.user.id, 'user.block', 'User', target._id, {
+      targetName: target.name,
+      targetEmail: target.email,
+    });
+
     req.io.emit('userUpdated', { id: target._id, isBlocked: true });
 
     res.json({ id: target._id, isBlocked: target.isBlocked });
@@ -147,6 +159,11 @@ router.put('/:id/unblock', protect, staffOrAdmin, async (req, res) => {
 
     target.isBlocked = false;
     await target.save();
+
+    await logAction(req.user.id, 'user.unblock', 'User', target._id, {
+      targetName: target.name,
+      targetEmail: target.email,
+    });
 
     req.io.emit('userUpdated', { id: target._id, isBlocked: false });
 
@@ -177,6 +194,11 @@ router.delete('/:id', protect, adminOnly, async (req, res) => {
 
     const user = await User.findByIdAndDelete(req.params.id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    await logAction(req.user.id, 'user.delete', 'User', user._id, {
+      targetName: user.name,
+      targetEmail: user.email,
+    });
 
     // Clean up past returned borrow records or keep for log
     req.io.emit('userDeleted', { id: req.params.id });

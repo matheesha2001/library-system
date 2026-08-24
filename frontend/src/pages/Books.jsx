@@ -13,10 +13,12 @@ export default function Books() {
   const [newBook, setNewBook] = useState({ title: '', author: '', isbn: '', totalCopies: 1 });
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [myReservations, setMyReservations] = useState([]);
   const { user } = useAuth();
 
   useEffect(() => {
     fetchBooks();
+    fetchMyReservations();
 
     // Listen for real-time events broadcast from the server.
     // This is the WebSocket requirement: when ANY client borrows/returns
@@ -47,6 +49,37 @@ export default function Books() {
       setTotalPages(res.data.totalPages);
     } catch (err) {
       setError('Could not load books');
+    }
+  }
+
+  async function fetchMyReservations() {
+    try {
+      const res = await api.get('/reservations/me');
+      setMyReservations(res.data.filter((r) => ['pending', 'ready'].includes(r.status)));
+    } catch (err) {
+      // Non-fatal - the Reserve button just falls back to always showing "Reserve"
+    }
+  }
+
+  function myReservationFor(bookId) {
+    return myReservations.find((r) => r.book?._id === bookId);
+  }
+
+  async function handleReserve(bookId) {
+    try {
+      await api.post('/reservations', { bookId });
+      fetchMyReservations();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Could not reserve book');
+    }
+  }
+
+  async function handleCancelReservation(reservationId) {
+    try {
+      await api.put(`/reservations/${reservationId}/cancel`);
+      fetchMyReservations();
+    } catch (err) {
+      setError('Could not cancel reservation');
     }
   }
 
@@ -119,26 +152,40 @@ export default function Books() {
       )}
 
       <div className="book-grid">
-        {books.map((book) => (
-          <div className="book-card" key={book._id}>
-            <h3>{book.title}</h3>
-            <p>by {book.author}</p>
-            <p className="isbn">ISBN: {book.isbn}</p>
-            <p className={book.availableCopies > 0 ? 'available' : 'unavailable'}>
-              {book.availableCopies} / {book.totalCopies} available
-            </p>
-            <div className="card-actions">
-              <button onClick={() => handleBorrow(book._id)} disabled={book.availableCopies < 1}>
-                Borrow
-              </button>
-              {isPanelUser(user) && (
-                <button className="danger" onClick={() => handleDelete(book._id)}>
-                  Delete
-                </button>
-              )}
+        {books.map((book) => {
+          const reservation = myReservationFor(book._id);
+          return (
+            <div className="book-card" key={book._id}>
+              <h3>{book.title}</h3>
+              <p>by {book.author}</p>
+              <p className="isbn">ISBN: {book.isbn}</p>
+              <p className={book.availableCopies > 0 ? 'available' : 'unavailable'}>
+                {book.availableCopies} / {book.totalCopies} available
+              </p>
+              <div className="card-actions">
+                {book.availableCopies > 0 ? (
+                  <button onClick={() => handleBorrow(book._id)}>Borrow</button>
+                ) : reservation ? (
+                  <>
+                    <button disabled>
+                      {reservation.status === 'ready' ? 'Ready for pickup' : 'Reserved'}
+                    </button>
+                    <button className="danger" onClick={() => handleCancelReservation(reservation._id)}>
+                      Cancel Reservation
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={() => handleReserve(book._id)}>Reserve</button>
+                )}
+                {isPanelUser(user) && (
+                  <button className="danger" onClick={() => handleDelete(book._id)}>
+                    Delete
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {books.length === 0 && <p>No books in the catalogue yet.</p>}
       </div>
 

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import api from '../api/client';
 import AppShell, { initials } from '../components/AppShell';
 import MonthlyBorrowChart from '../components/MonthlyBorrowChart';
+import { isOverdue, estimateFine } from '../utils/fines';
+import { MAX_BOOKS_PER_MEMBER } from '../utils/borrowLimits';
 
 function daysBetween(a, b) {
   return Math.ceil((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
@@ -47,12 +49,13 @@ export default function Dashboard() {
   const current = myRecords.filter((r) => !r.returnDate);
   const history = myRecords.filter((r) => r.returnDate);
   const overdue = current
-    .filter((r) => new Date(r.dueDate) < now)
+    .filter((r) => isOverdue(r))
     .map((r) => ({ ...r, daysOverdue: daysBetween(now, new Date(r.dueDate)) }));
   const dueSoon = current.filter((r) => {
     const diff = daysBetween(new Date(r.dueDate), now) * -1;
     return diff >= 0 && diff <= 3;
   });
+  const pendingRenewals = current.filter((r) => r.renewalRequested);
 
   async function handleReturn(recordId) {
     try {
@@ -122,7 +125,10 @@ export default function Dashboard() {
               <span className="font-label-md text-label-md text-on-surface-variant dark:text-slate-400 uppercase tracking-wider">Currently Borrowed</span>
               <span className="material-symbols-outlined text-primary dark:text-sky-400 text-[20px]">import_contacts</span>
             </div>
-            <div className="font-headline-lg text-headline-lg text-primary dark:text-sky-400">{current.length}</div>
+            <div className="font-headline-lg text-headline-lg text-primary dark:text-sky-400">
+              {current.length}
+              <span className="font-label-md text-label-md text-on-surface-variant dark:text-slate-400">/{MAX_BOOKS_PER_MEMBER}</span>
+            </div>
           </div>
           <div className="bg-surface dark:bg-slate-800 rounded-xl p-5 border border-outline-variant dark:border-slate-700 shadow-sm">
             <div className="flex justify-between items-start mb-2">
@@ -136,7 +142,7 @@ export default function Dashboard() {
               <span className="font-label-md text-label-md text-on-surface-variant dark:text-slate-400 uppercase tracking-wider">Pending Requests</span>
               <span className="material-symbols-outlined text-on-tertiary-container dark:text-amber-400 text-[20px]">pending_actions</span>
             </div>
-            <div className="font-headline-lg text-headline-lg text-on-surface dark:text-slate-100">0</div>
+            <div className="font-headline-lg text-headline-lg text-on-surface dark:text-slate-100">{pendingRenewals.length}</div>
           </div>
           <div className="bg-surface dark:bg-slate-800 rounded-xl p-5 border border-error/30 dark:border-rose-900 bg-error-container/10 dark:bg-rose-950/20 shadow-sm">
             <div className="flex justify-between items-start mb-2">
@@ -161,7 +167,8 @@ export default function Dashboard() {
                   <p className="p-4 font-body-md text-body-md text-on-surface-variant dark:text-slate-400">You don&apos;t have any books checked out right now.</p>
                 )}
                 {current.map((r) => {
-                  const late = new Date(r.dueDate) < now;
+                  const late = isOverdue(r);
+                  const fine = estimateFine(r);
                   return (
                     <div key={r._id} className="p-4 flex items-center justify-between gap-4">
                       <div>
@@ -172,7 +179,9 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-3 flex-shrink-0">
                         {late && (
-                          <span className="font-label-md text-label-md text-error dark:text-rose-400">Overdue</span>
+                          <span className="font-label-md text-label-md text-error dark:text-rose-400">
+                            Overdue{fine > 0 ? ` · $${fine.toFixed(2)} fine` : ''}
+                          </span>
                         )}
                         <button
                           onClick={() => handleReturn(r._id)}
@@ -205,7 +214,17 @@ export default function Dashboard() {
                         Returned {new Date(r.returnDate).toLocaleDateString()}
                       </p>
                     </div>
-                    <span className="material-symbols-outlined text-secondary dark:text-emerald-400 text-[20px]">task_alt</span>
+                    {r.fineAmount > 0 ? (
+                      <span
+                        className={`font-label-md text-label-md flex-shrink-0 ${
+                          r.fineWaived ? 'text-secondary dark:text-emerald-400' : 'text-error dark:text-rose-400'
+                        }`}
+                      >
+                        {r.fineWaived ? 'Fine waived' : `$${r.fineAmount.toFixed(2)} fine`}
+                      </span>
+                    ) : (
+                      <span className="material-symbols-outlined text-secondary dark:text-emerald-400 text-[20px]">task_alt</span>
+                    )}
                   </div>
                 ))}
               </div>
@@ -213,11 +232,27 @@ export default function Dashboard() {
 
             <div className="bg-surface dark:bg-slate-800 rounded-xl border border-outline-variant dark:border-slate-700 shadow-sm overflow-hidden">
               <div className="p-4 border-b border-outline-variant dark:border-slate-700">
-                <h3 className="font-title-lg text-title-lg text-on-surface dark:text-slate-100">Pending Borrowing Requests</h3>
+                <h3 className="font-title-lg text-title-lg text-on-surface dark:text-slate-100">Pending Renewal Requests</h3>
               </div>
-              <p className="p-4 font-body-md text-body-md text-on-surface-variant dark:text-slate-400">
-                Bindly approves loans instantly when you borrow a book, so there&apos;s nothing waiting on approval right now.
-              </p>
+              {pendingRenewals.length === 0 ? (
+                <p className="p-4 font-body-md text-body-md text-on-surface-variant dark:text-slate-400">
+                  Borrows and returns are instant, so the only thing that ever waits here is a renewal request - nothing pending right now.
+                </p>
+              ) : (
+                <div className="divide-y divide-outline-variant/50 dark:divide-slate-700/50">
+                  {pendingRenewals.map((r) => (
+                    <div key={r._id} className="p-4 flex items-center justify-between gap-4">
+                      <div>
+                        <p className="font-body-md text-body-md text-on-surface dark:text-slate-100 font-semibold">{r.book?.title}</p>
+                        <p className="font-label-md text-label-md text-on-surface-variant dark:text-slate-400 mt-0.5">
+                          Requested {new Date(r.renewalRequestedAt).toLocaleDateString()} &middot; awaiting staff review
+                        </p>
+                      </div>
+                      <span className="material-symbols-outlined text-tertiary dark:text-amber-400 text-[20px]">hourglass_top</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -232,7 +267,9 @@ export default function Dashboard() {
                   {overdue.map((r) => (
                     <li key={r._id} className="flex items-center justify-between gap-2">
                       <span className="font-body-md text-body-md text-on-surface dark:text-slate-100">{r.book?.title}</span>
-                      <span className="font-label-md text-label-md text-error dark:text-rose-400 flex-shrink-0">{r.daysOverdue}d late</span>
+                      <span className="font-label-md text-label-md text-error dark:text-rose-400 flex-shrink-0">
+                        {r.daysOverdue}d late{estimateFine(r) > 0 ? ` · $${estimateFine(r).toFixed(2)}` : ''}
+                      </span>
                     </li>
                   ))}
                 </ul>

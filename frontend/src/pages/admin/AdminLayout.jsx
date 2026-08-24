@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { to: '/admin/users', label: 'Manage Users', icon: 'group' },
   { to: '/admin/borrows', label: 'Manage Borrows', icon: 'handshake' },
   { to: '/admin/reports', label: 'Reports & Analytics', icon: 'assessment' },
+  { to: '/admin/audit-log', label: 'Audit Log', icon: 'history', adminOnly: true },
 ];
 
 function NavLinks({ onNavigate }) {

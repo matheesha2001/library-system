@@ -27,6 +27,11 @@ export default function AdminBooks() {
   // Delete modal state
   const [deleteBook, setDeleteBook] = useState(null);
 
+  // Reservation queue modal state
+  const [reservationBook, setReservationBook] = useState(null);
+  const [reservationQueue, setReservationQueue] = useState([]);
+  const [reservationQueueLoading, setReservationQueueLoading] = useState(false);
+
   // Debounce the search box so every keystroke doesn't hit the API.
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 350);
@@ -172,6 +177,28 @@ export default function AdminBooks() {
       setDeleteBook(null);
     } catch (err) {
       setError('Could not delete book record.');
+    }
+  }
+
+  async function openReservationQueue(book) {
+    setReservationBook(book);
+    setReservationQueueLoading(true);
+    try {
+      const res = await api.get(`/reservations/book/${book._id}`);
+      setReservationQueue(res.data);
+    } catch (err) {
+      setError('Could not load the reservation queue.');
+    } finally {
+      setReservationQueueLoading(false);
+    }
+  }
+
+  async function handleCancelReservation(reservationId) {
+    try {
+      await api.put(`/reservations/${reservationId}/cancel`);
+      setReservationQueue((prev) => prev.filter((r) => r._id !== reservationId));
+    } catch (err) {
+      setError('Could not cancel that reservation.');
     }
   }
 
@@ -323,6 +350,14 @@ export default function AdminBooks() {
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => openReservationQueue(book)}
+                            className="p-1.5 rounded-lg text-on-surface-variant dark:text-slate-400 hover:text-secondary dark:hover:text-purple-400 hover:bg-secondary/10 dark:hover:bg-purple-950/50 transition-colors"
+                            title="View reservation queue"
+                            type="button"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">bookmarks</span>
+                          </button>
                           <button
                             onClick={() => openEditModal(book)}
                             className="p-1.5 rounded-lg text-on-surface-variant dark:text-slate-400 hover:text-primary dark:hover:text-sky-400 hover:bg-primary/10 dark:hover:bg-sky-950/50 transition-colors"
@@ -489,6 +524,80 @@ export default function AdminBooks() {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Reservation Queue Modal */}
+        {reservationBook && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 dark:bg-black/70 backdrop-blur-xs">
+            <div className="bg-surface dark:bg-slate-800 rounded-xl border border-outline-variant dark:border-slate-700 max-w-md w-full p-6 shadow-xl">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h2 className="font-headline-sm text-headline-sm text-on-surface dark:text-slate-100">Reservation Queue</h2>
+                  <p className="font-body-sm text-xs text-on-surface-variant dark:text-slate-400 mt-0.5">{reservationBook.title}</p>
+                </div>
+                <button
+                  onClick={() => setReservationBook(null)}
+                  className="p-1 rounded-lg hover:bg-surface-variant dark:hover:bg-slate-700 text-on-surface-variant dark:text-slate-400"
+                  type="button"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+
+              {reservationQueueLoading ? (
+                <p className="text-center py-6 text-on-surface-variant dark:text-slate-400 text-sm">Loading queue...</p>
+              ) : reservationQueue.length === 0 ? (
+                <p className="text-center py-6 text-on-surface-variant dark:text-slate-400 text-sm">No one is waiting on this book right now.</p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {reservationQueue.map((r, i) => (
+                    <div
+                      key={r._id}
+                      className="p-3 rounded-lg border border-outline-variant dark:border-slate-700 bg-surface-container-low dark:bg-slate-900 flex justify-between items-center gap-3"
+                    >
+                      <div>
+                        <p className="font-label-md text-on-surface dark:text-slate-100 font-semibold text-sm">
+                          #{i + 1} &middot; {r.member?.name || 'Unknown member'}
+                        </p>
+                        <p className="font-body-sm text-xs text-on-surface-variant dark:text-slate-400">
+                          {r.member?.email} &middot; requested {new Date(r.requestedAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`font-label-sm text-xs px-2.5 py-1 rounded-full font-semibold ${
+                            r.status === 'ready'
+                              ? 'bg-secondary/15 dark:bg-emerald-950/60 text-secondary dark:text-emerald-300'
+                              : 'bg-tertiary/15 dark:bg-amber-950/60 text-tertiary dark:text-amber-300'
+                          }`}
+                        >
+                          {r.status === 'ready' ? 'Ready' : 'Waiting'}
+                        </span>
+                        <button
+                          onClick={() => handleCancelReservation(r._id)}
+                          className="p-1 rounded text-on-surface-variant dark:text-slate-400 hover:text-error dark:hover:text-rose-400 hover:bg-error/10 dark:hover:bg-rose-950/50 transition-colors"
+                          title="Cancel this reservation"
+                          type="button"
+                        >
+                          <span className="material-symbols-outlined text-[18px]">close</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-4 mt-4 border-t border-outline-variant dark:border-slate-700">
+                <button
+                  onClick={() => setReservationBook(null)}
+                  className="w-full py-2.5 bg-surface-variant dark:bg-slate-700 text-on-surface-variant dark:text-slate-200 font-label-md rounded-lg hover:bg-surface-variant/80 dark:hover:bg-slate-600 transition-colors"
+                  type="button"
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         )}

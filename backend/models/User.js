@@ -22,6 +22,11 @@ const userSchema = new mongoose.Schema(
       },
     },
     githubId: { type: String, unique: true, sparse: true },
+    // Never queried by default (select: false) - only pulled in explicitly
+    // by POST /auth/reset-password, matching how `password` itself is never
+    // leaked through a plain .find()/.findById() elsewhere in this app.
+    resetPasswordTokenHash: { type: String, select: false },
+    resetPasswordExpires: { type: Date, select: false },
     role: { type: String, enum: ['member', 'staff', 'admin'], default: 'member' },
     profilePicture: { type: String, default: '' },
     phoneNumber: { type: String, trim: true },
